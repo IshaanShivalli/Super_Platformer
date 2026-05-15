@@ -61,6 +61,7 @@ function PlayState:enter(params)
     self.tileMap = self.level.tileMap
     self.camera = Camera(self.tileMap.width, self.tileMap.height, self.levelNum)
 
+    local startPipeX = 0
     local startPipeY = (7 - 3) * TILE_SIZE + 16
 
     Timer.tween(1, {
@@ -165,7 +166,7 @@ function PlayState:update(dt)
             if e.texture == 'bowser' then bowser = e break end
         end
 
-        if self.player.x > lockThreshold and bowser and not bowser.defeated then
+        if self.player.x > lockThreshold and bowser and not bowser.defeated and not self.transitioning then
             self.lockedCamX = lockThreshold
             
             if not self.bowserIntro then
@@ -173,13 +174,13 @@ function PlayState:update(dt)
                 self.player.controlLock = true
                 Chain(
                     function(go)
-                        gSounds['dk-roar']:play()
+                        gSounds['dk-roar']:play() -- Bowser's roar triggers immediately
                         self.dialogueText = "Bowser: Gwa ha ha! You've reached the end of the line, Mario!"
                         Timer.after(2.5, go)
                     end,
                     function(go) self.dialogueText = "Mario: Where are my friends?!" Timer.after(2, go) end,
                     function(go) self.dialogueText = "Bowser: They're my guests of honor... forever!" Timer.after(2, go) end,
-                    function(go) self.dialogueText = nil self.player.controlLock = false bowser.active = true go() end
+                    function(go) self.dialogueText = nil self.player.controlLock = false bowser.active = true go() end -- Bowser becomes active after dialogue
                 )()
             end
         end
@@ -187,21 +188,21 @@ function PlayState:update(dt)
         if self.lockedCamX then
             self.player.x = math.max(self.player.x, self.lockedCamX)
             
-            if bowser and not bowser.defeated then
+            if bowser and not bowser.defeated and not self.transitioning then
                 self.player.x = math.min(self.player.x, self.lockedCamX + VIRTUAL_WIDTH - self.player.width)
             end
         end
 
         for _, entity in pairs(self.level.entities) do
             local isFriend = entity.texture == 'princess' or entity.texture == 'mushroom-friend'
-            if isFriend and self.player:collides(entity) and not self.transitioning then
+            if isFriend and bowser and bowser.defeated and self.player:collides(entity) and not self.transitioning then
                 self:triggerBowserVictory()
                 break
             end
         end
 
         for _, object in pairs(self.level.objects) do
-            if object.texture == 'luigi' and self.player:collides(object) and not self.transitioning then
+            if object.texture == 'luigi' and bowser and bowser.defeated and self.player:collides(object) and not self.transitioning then
                 self:triggerBowserVictory()
                 break
             end
@@ -429,13 +430,10 @@ function PlayState:update(dt)
         end
 
         if bowser then
-            if self.player:collides(bowser) and not self.player.controlLock and not bowser.defeated then
-                
-                if self.player.dy > 0 and self.player.y + self.player.height <= bowser.y + 10 and (bowser.hitTimer or 0) <= 0 then
+            if self.player:collides(bowser) and not self.player.controlLock and not bowser.defeated and (bowser.hitTimer or 0) <= 0 then
+                if self.player.dy > 0 and self.player.y + self.player.height <= bowser.y + 15 then
                     gSounds['kill']:play()
                     bowser:takeDamage()
-
-                    bowser.hitTimer = 0.8
 
                     local playerMid = self.player.x + self.player.width / 2
                     local bossMid = bowser.x + bowser.width / 2
@@ -457,11 +455,12 @@ function PlayState:update(dt)
 
             for i = #self.fireballs, 1, -1 do
                 local fireball = self.fireballs[i]
-                if fireball.player == self.player and fireball:collides(bowser) and not bowser.defeated and (bowser.hitTimer or 0) <= 0 then
-                    gSounds['kill']:play()
-                    bowser:takeDamage()
-                    bowser.hitTimer = 0.8
-                    fireball.dead = true
+                if fireball.player == self.player and fireball:collides(bowser) and not bowser.defeated then
+                    if (bowser.hitTimer or 0) <= 0 then
+                        gSounds['kill']:play()
+                        bowser:takeDamage()
+                    end
+                    fireball.dead = true -- Fireball always breaks on hit
                 end
             end
 
@@ -501,9 +500,14 @@ function PlayState:update(dt)
 
     for i = #self.level.entities, 1, -1 do
         local entity = self.level.entities[i]
-        local isFriend = entity.texture == 'princess' or entity.texture == 'mushroom-friend'
-        
-        if entity.class ~= 'DonkeyKong' and entity.class ~= 'Bowser' and not isFriend and self.player:collides(entity) and not self.player.controlLock then
+        local isFriend = entity.texture == 'princess' or entity.texture == 'mushroom-friend' or entity.texture == 'luigi'
+        local isBoss = entity.class == 'DonkeyKong' or entity.class == 'Bowser' or 
+                       entity.texture == 'donkey-kong' or entity.texture == 'bowser' or
+                       entity.texture == 'barrels'
+
+        if isBoss or isFriend then
+            goto continue
+        elseif self.player:collides(entity) and not self.player.controlLock then
             local previousBottom = (self.player.y + self.player.height) - (self.player.dy * dt)
             local currentBottom = self.player.y + self.player.height
             local entityTop = entity.y
@@ -525,6 +529,7 @@ function PlayState:update(dt)
                 self.player:takeHit()
             end
         end
+        ::continue::
     end
 
     for i = #self.fireballs, 1, -1 do
@@ -534,7 +539,7 @@ function PlayState:update(dt)
         local hitEnemy = false
         for j = #self.level.entities, 1, -1 do
             local enemy = self.level.entities[j]
-            local isFriend = enemy.texture == 'princess' or enemy.texture == 'mushroom-friend'
+            local isFriend = enemy.texture == 'princess' or enemy.texture == 'mushroom-friend' or enemy.texture == 'luigi'
             if enemy.class ~= 'DonkeyKong' and enemy.texture ~= 'bowser' and not isFriend and fireball:collides(enemy) then
                 if enemy.takeDamage then
                     enemy:takeDamage()
@@ -749,8 +754,6 @@ function PlayState:render()
         end
     end
 
-    love.graphics.translate(-math.floor(self.camera.x), -math.floor(self.camera.y))
-
     if self.levelNum >= 10 then
         if self.levelNum >= UNDERGROUND_LEVEL_START or self.levelNum == 10 or self.levelNum == 20 then
         else 
@@ -765,6 +768,9 @@ function PlayState:render()
                 end
             end
         end
+
+        love.graphics.translate(-math.floor(self.camera.x), -math.floor(self.camera.y))
+
         if self.level.tileMap then self.level.tileMap:render() end
         if self.level.objects then for _, o in pairs(self.level.objects) do o:render() end end
         if self.level.entities then for _, e in pairs(self.level.entities) do e:render() end end
@@ -780,6 +786,7 @@ function PlayState:render()
         self.player:render()
         
     else
+        love.graphics.translate(-math.floor(self.camera.x), -math.floor(self.camera.y))
         self.level:render()
         self.player:render()
     end
@@ -788,11 +795,7 @@ function PlayState:render()
         fireball:render()
     end
 
-    love.graphics.setColor(0, 0, 0, self.fadeOpacity)
-    love.graphics.rectangle('fill', 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT)
-    love.graphics.setColor(1, 1, 1, 1)
-
-    love.graphics.pop()
+    love.graphics.pop() -- End of World Space
 
     if self.showHUD then
         love.graphics.setFont(gFonts['medium'])
@@ -806,7 +809,7 @@ function PlayState:render()
         love.graphics.print("Level: " .. tostring(self.levelNum), 4, 19)
     end
 
-    if self.levelNum == 10 or self.levelNum == 20 then
+    if self.levelNum == 10 or self.levelNum == 20 or self.levelNum == 26 then
         local dk = nil
         for _, e in pairs(self.level.entities) do
             if e.texture == 'donkey-kong' then dk = e break end
@@ -823,14 +826,6 @@ function PlayState:render()
             love.graphics.setColor(1, 1, 1, 1)
         end
 
-        if self.dialogueText then
-            love.graphics.setColor(0, 0, 0, 0.8)
-            love.graphics.rectangle('fill', 10, VIRTUAL_HEIGHT - 40, VIRTUAL_WIDTH - 20, 30)
-            love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.rectangle('line', 10, VIRTUAL_HEIGHT - 40, VIRTUAL_WIDTH - 20, 30)
-            love.graphics.setFont(gFonts['small'])
-            love.graphics.printf(self.dialogueText, 15, VIRTUAL_HEIGHT - 35, VIRTUAL_WIDTH - 30, 'left')
-        end
     end
 
     if self.levelNum == 26 then
@@ -849,50 +844,71 @@ function PlayState:render()
             love.graphics.setColor(1, 1, 1, 1)
         end
     end
+
+    love.graphics.setColor(0, 0, 0, self.fadeOpacity)
+    love.graphics.rectangle('fill', 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT)
+    love.graphics.setColor(1, 1, 1, 1)
+
+    if self.dialogueText then
+        love.graphics.setColor(0, 0, 0, 0.8)
+        love.graphics.rectangle('fill', 10, VIRTUAL_HEIGHT - 40, VIRTUAL_WIDTH - 20, 30)
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.rectangle('line', 10, VIRTUAL_HEIGHT - 40, VIRTUAL_WIDTH - 20, 30)
+        love.graphics.setFont(gFonts['small'])
+        love.graphics.printf(self.dialogueText, 15, VIRTUAL_HEIGHT - 35, VIRTUAL_WIDTH - 30, 'left')
+    end
 end
 
 
 function PlayState:updateCamera(dt)
     if self.lockedCamX then
         self.camera.x = self.lockedCamX
-        return
+    else
+        self.camera:update(dt, self.player, self.levelNum)
     end
 
-    self.camera:update(dt, self.player, self.levelNum)
-    
     self.camX = self.camera.x
     self.camY = self.camera.y
 end
 
 function PlayState:triggerBowserVictory()
+    if self.transitioning then return end
     self.transitioning = true
-    self.lockedCamX = self.camX
-    self.showHUD = false
     self.player.controlLock = true
     self.player.dx = 0
     self.player.dy = 0
+    self.showHUD = false
+
+    for _, e in pairs(self.level.entities) do
+        if e.texture == 'bowser' then
+            Timer.tween(0.5, { [e] = { opacity = 0 } }):finish(function()
+                e.dead = true
+            end)
+            break
+        end
+    end
 
     gSounds['powerup-reveal']:play() 
 
     Chain(
         function(go)
             self.dialogueText = "Princess Peach: Mario! You saved us!"
-            Timer.after(2.5, go)
+            Timer.after(1.5, go)
         end,
         function(go)
             self.dialogueText = "Luigi: Wowie! You actually did it, bro!"
-            Timer.after(2, go)
+            Timer.after(1.5, go)
         end,
         function(go)
             self.dialogueText = "Mushroom Friend: The castle is safe again! Let's go home!"
-            Timer.after(2, go)
+            Timer.after(1.5, go)
         end,
         function(go)
             self.dialogueText = nil
-            Timer.tween(1.0, { [self] = { fadeOpacity = 1 } }):finish(go)
+            Timer.tween(0.5, { [self] = { fadeOpacity = 1 } }):finish(go)
         end
     )(function()
-        love.filesystem.write('lvls', tostring(self.levelNum + 1))
+        love.filesystem.write('lvls', '1')
         gStateMachine:change('start')
     end)
 end
@@ -970,13 +986,19 @@ function PlayState:spawnEnemies()
 
     if self.levelNum >= UNDERGROUND_LEVEL_START or self.levelNum == 26 then 
         local lowerFloorRow = self.tileMap.height - 1
+        
+        -- Limit enemy spawning for Level 26 to avoid the boss arena
+        local spawnLimit = self.tileMap.width - 4
+        if self.levelNum == 26 then
+            spawnLimit = self.tileMap.width - 35
+        end
 
-        for x = 8, self.tileMap.width - 4 do
+        for x = 8, spawnLimit do
             for y = 3, lowerFloorRow do
                 local isFloorTile = self.tileMap.tiles[y][x].id == TILE_ID_UNDERGROUND_GROUND
                                  or self.tileMap.tiles[y][x].id == TILE_ID_CASTLE_GROUND
                 local isFloorObject = false
-                
+
                 for _, obj in pairs(self.level.objects) do
                     if obj.solid and obj.texture == 'underground-bricks' and math.floor(obj.x / TILE_SIZE) + 1 == x and math.floor(obj.y / TILE_SIZE) + 1 == y then
                         isFloorObject = true

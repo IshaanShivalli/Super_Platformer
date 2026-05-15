@@ -4,4 +4,4 @@ Some textures and sprites used in this project are inspired by or derived from c
 
 All trademarks and copyrighted assets belong to their respective owners.
 
-Original gameplay programming and custom modifications by [Ishaan Shivalli].
+Original gameplay programming and custom modifications by Ishaan Shivalli.

@@ -4,8 +4,8 @@ function Bowser:init(def)
     def.texture = 'bowser'
     Entity.init(self, def)
     self.class = 'Bowser'
-    self.hp = 20
-    self.maxHP = self.hp
+    self.hp = 15
+    self.maxHP = 15
     self.attackTimer = 0
     self.attackCooldown = 2
     self.hitTimer = 0
@@ -30,7 +30,7 @@ function Bowser:init(def)
             looping = false
         },
         ['hit'] = Animation {
-            frames = {6},
+            frames = {1},
             interval = 1
         }
     }
@@ -67,10 +67,12 @@ function Bowser:update(dt)
     end
 
     if self.hitTimer > 0 then
-        self.hitTimer = self.hitTimer - dt
         self.opacity = (math.floor(self.hitTimer * 20) % 2 == 0) and 0.5 or 1
     else
         self.opacity = 1
+        if self.currentAnimation == self.animations['hit'] then
+            self.currentAnimation = self.animations['idle']
+        end
     end
 
     self.attackTimer = self.attackTimer + dt
@@ -112,8 +114,12 @@ function Bowser:takeDamage()
     gSounds['dk-hit']:play()
     self.hitTimer = 0.8
 
+    -- Visually indicate damage
+    self.currentAnimation = self.animations['hit']
+
     if self.hp <= 0 then
         self.defeated = true
         gSounds['dk-roar']:play()
+        self.dx = 0
     end
 end

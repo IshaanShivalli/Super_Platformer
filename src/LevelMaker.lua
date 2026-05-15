@@ -108,16 +108,31 @@ function LevelMaker.generate(width, height, levelNum)
         local map = TileMap(arenaWidth, height)
         map.tiles = tiles
         map.render = function(this)
+            local texture = levelNum == 10 and 'tiles' or 'underground-tiles'
             for y = 1, this.height do
                 for x = 1, this.width do
                     local tile = this.tiles[y][x]
                     if tile.id ~= TILE_ID_EMPTY then
-                        love.graphics.draw(gTextures['castle-ground'], gFrames['castle-ground'][1], (x - 1) * TILE_SIZE, (y - 1) * TILE_SIZE)
+                        love.graphics.draw(gTextures[texture], gFrames[texture][1], (x - 1) * TILE_SIZE, (y - 1) * TILE_SIZE)
                     end
                 end
             end
         end
-        return GameLevel(entities, objects, map, levelNum)
+
+        local dk = DonkeyKong {
+            texture = 'donkey-kong',
+            x = (arenaWidth - 10) * TILE_SIZE,
+            y = (7 - 1) * TILE_SIZE - 28,
+            width = 28, height = 28,
+            minX = 5 * TILE_SIZE,
+            maxX = (arenaWidth - 5) * TILE_SIZE
+        }
+        table.insert(entities, dk)
+
+        local level = GameLevel(entities, objects, map, levelNum)
+        dk.level = level
+        
+        return level
     end
 
     if levelNum >= 21 and levelNum <= 25 then
@@ -204,7 +219,7 @@ function LevelMaker.generate(width, height, levelNum)
         local arenaWidth = width
         local groundRow = 10
         local ceilingRow = 3
-        local bowserCol = arenaWidth - 25
+        local bowserCol = arenaWidth - 25 -- Bowser's column, relative to arena end
 
         for y = 1, height do table.insert(tiles, {}) end
         for x = 1, arenaWidth do
@@ -232,14 +247,14 @@ function LevelMaker.generate(width, height, levelNum)
         local gate = GameObject {
             texture = 'gate',
             x = (bowserCol + 2) * TILE_SIZE,
-            y = (groundRow - 7) * TILE_SIZE,
+            y = (groundRow - 7) * TILE_SIZE, -- 6 blocks high (96 pixels)
             width = 16,
             height = 96,
             frame = 1,
             collidable = true,
             solid = true,
             isGate = true,
-            render = function(self)
+            render = function(self) -- Custom render for tiled gate
                 for i = 0, 5 do
                     love.graphics.draw(gTextures['gate'], gFrames['gate'][1], self.x, self.y + (i * 16))
                 end
@@ -249,7 +264,7 @@ function LevelMaker.generate(width, height, levelNum)
 
         table.insert(entities, Entity {
             texture = 'princess',
-            x = (bowserCol + 4) * TILE_SIZE,
+            x = (bowserCol + 4) * TILE_SIZE, -- Adjusted position to be visible behind gate
             y = (groundRow - 1) * TILE_SIZE - 24,
             width = 16,
             height = 24,
@@ -258,7 +273,7 @@ function LevelMaker.generate(width, height, levelNum)
 
         table.insert(objects, GameObject {
             texture = 'luigi',
-            x = (bowserCol + 5) * TILE_SIZE,
+            x = (bowserCol + 5) * TILE_SIZE, -- Adjusted position to be visible behind gate
             y = (groundRow - 1) * TILE_SIZE - 16,
             width = 16,
             height = 16,
@@ -267,7 +282,7 @@ function LevelMaker.generate(width, height, levelNum)
 
         table.insert(entities, Entity {
             texture = 'mushroom-friend',
-            x = (bowserCol + 6) * TILE_SIZE,
+            x = (bowserCol + 6) * TILE_SIZE, -- Adjusted position to be visible behind gate
             y = (groundRow - 1) * TILE_SIZE - 24,
             width = 16,
             height = 24,
@@ -302,103 +317,17 @@ function LevelMaker.generate(width, height, levelNum)
                 end
             end
         end
-        local x = 8
-        while x < arenaWidth - 10 do
-            local spawnedLava = false
 
-            if math.random(12) == 1 and (x < bowserCol - 5 or x > bowserCol + 5) then
-
-                local lavaWidth = math.random(1, 2)
-                local canSpawn = true
-                for checkX = x - 2, x + lavaWidth + 1 do
-                    if lavaColumns[checkX] then
-                        canSpawn = false
-                        break
-                    end
-                end
-
-                if canSpawn then
-                    spawnedLava = true
-                    for reserveX = x - 2, x + lavaWidth + 3 do
-                        lavaColumns[reserveX] = true
-                    end
-
-                    for i = 0, lavaWidth - 1 do
-                        local lavaX = x + i
-
-                        lavaColumns[lavaX] = true
-
-                        for y = groundRow, height do
-                            tiles[y][lavaX].id = TILE_ID_EMPTY
-                        end
-
-                        table.insert(objects, GameObject {
-                            texture = 'lava-topper',
-                            x = (lavaX - 1) * TILE_SIZE,
-                            y = (groundRow - 1) * TILE_SIZE + 6,
-                            width = 16,
-                            height = 10,
-                            frame = 1,
-                            collidable = false,
-                            solid = false,
-                            isLava = true
-                        })
-
-                        for lavaY = groundRow + 1, height do
-                            table.insert(objects, GameObject {
-                                texture = 'lava',
-                                x = (lavaX - 1) * TILE_SIZE,
-                                y = (lavaY - 1) * TILE_SIZE + 6,
-                                width = 16,
-                                height = 10,
-                                frame = 1,
-                                collidable = false,
-                                solid = false,
-                                isLava = true
-                            })
-                        end
-                    end
-
-                    local middleX = x + math.floor(lavaWidth / 2)
-
-                    table.insert(objects, GameObject {
-                        texture = 'gems',
-                        x = (middleX - 1) * TILE_SIZE + 4,
-                        y = (groundRow - 4) * TILE_SIZE,
-                        width = 9,
-                        height = 16,
-                        frame = 1,
-                        collidable = true,
-                        consumable = true,
-
-                        onConsume = function(player, gem)
-                            gSounds['pickup']:play()
-                            player:addScore(100)
-                        end
-                    })
-
-                    x = x + lavaWidth + 5
-                end
-            end
-
-            if not spawnedLava then
-                x = x + 1
-            end
-        end
-
-
-        for x = 8, arenaWidth - 12 do
-            if math.random(8) == 1 and not lavaColumns[x] and (x < bowserCol - 5 or x > bowserCol + 5) then
-
+        -- Platforms, coins, and goombas for the gauntlet section (before Bowser's arena)
+        for x = 10, bowserCol - 15 do
+            if math.random(8) == 1 then
                 local platformWidth = math.random(2, 4)
-                local platformY = math.random(4, 6)
+                local platformY = math.random(4, 7)
 
                 for i = 0, platformWidth - 1 do
-                    local platformX = x + i
-
                     table.insert(objects, GameObject {
                         texture = 'castle-brick',
-                        x = (platformX - 1) * TILE_SIZE,
+                        x = (x + i - 1) * TILE_SIZE,
                         y = (platformY - 1) * TILE_SIZE,
                         width = 16,
                         height = 16,
@@ -407,63 +336,49 @@ function LevelMaker.generate(width, height, levelNum)
                         solid = true
                     })
 
-                    castlePlatformColumns[platformX] = true
+                    if math.random(3) == 1 then
+                        table.insert(objects, GameObject {
+                            texture = 'gems',
+                            x = (x + i - 1) * TILE_SIZE + 4,
+                            y = (platformY - 1) * TILE_SIZE - 16,
+                            width = 9,
+                            height = 16,
+                            frame = 1,
+                            collidable = true,
+                            consumable = true,
+                            onConsume = function(player, gem)
+                                gSounds['pickup']:play()
+                                player:addScore(100)
+                            end
+                        })
+                    end
                 end
             end
-        end
 
-        for x = 6, arenaWidth - 8 do
-            if math.random(6) == 1 and not castlePlatformColumns[x] and not lavaColumns[x] and (x < bowserCol - 5 or x > bowserCol + 5) then
-                local blockY = math.random(groundRow - 4, groundRow - 3)
+            if math.random(10) == 1 then
                 table.insert(objects, GameObject {
                     texture = 'jump-blocks',
                     x = (x - 1) * TILE_SIZE,
-                    y = (blockY - 1) * TILE_SIZE,
-                    width = 16,
-                    height = 16,
-                    frame = 1,
-                    collidable = true,
-                    hit = false,
-                    solid = true,
-
+                    y = (groundRow - 4) * TILE_SIZE,
+                    width = 16, height = 16, frame = 1,
+                    collidable = true, hit = false, solid = true,
                     onCollide = function(obj)
                         if not obj.hit then
-                            local powerupType =
-                                math.random(2) == 1 and POWERUP_SIZE_ID or POWERUP_FIRE_ID
-
-                            local powerupTexture =
-                                powerupType == POWERUP_SIZE_ID and 'powerup'
-                                or 'fire-powerup'
-
+                            local powerupType = math.random(2) == 1 and POWERUP_SIZE_ID or POWERUP_FIRE_ID
+                            local powerupTexture = powerupType == POWERUP_SIZE_ID and 'powerup' or 'fire-powerup'
                             local powerup = GameObject {
                                 texture = powerupTexture,
                                 x = obj.x,
                                 y = obj.y - 2,
-                                width = 16,
-                                height = 16,
-                                frame = 1,
-                                collidable = true,
-                                consumable = true,
-                                isPowerup = true,
-                                powerupType = powerupType,
-                                solid = false,
-
-                                onConsume = function(player, pObj)
-                                    player:gainPowerup(pObj.powerupType)
-                                end
+                                width = 16, height = 16, frame = 1,
+                                collidable = true, consumable = true, isPowerup = true,
+                                powerupType = powerupType, solid = false,
+                                onConsume = function(player, pObj) player:gainPowerup(pObj.powerupType) end
                             }
-
-                            Timer.tween(0.3, {
-                                [powerup] = { y = obj.y - 16 }
-                            })
-
+                            Timer.tween(0.3, {[powerup] = {y = obj.y - 16}})
                             gSounds['powerup-reveal']:play()
                             table.insert(objects, powerup)
-
                             obj.hit = true
-                            obj.texture = 'castle-brick'
-                            obj.frame = 1
-
                             gSounds['empty-block']:play()
                         else
                             gSounds['empty-block']:play()
@@ -471,43 +386,17 @@ function LevelMaker.generate(width, height, levelNum)
                     end
                 })
             end
+
+            if math.random(15) == 1 then
+                table.insert(entities, Goomba {
+                    texture = 'creatures',
+                    x = (x - 1) * TILE_SIZE,
+                    y = (groundRow - 2) * TILE_SIZE,
+                    width = 16,
+                    height = 16
+                })
+            end
         end
-    for x = 8, arenaWidth - 12 do
-        if not lavaColumns[x] and math.random(3) == 1 and (x < bowserCol - 5 or x > bowserCol + 5) then
-            local coinY = math.random(3, 6)
-            table.insert(objects, GameObject {
-                texture = 'gems',
-                x = (x - 1) * TILE_SIZE + 4,
-                y = (coinY - 1) * TILE_SIZE,
-                width = 9,
-                height = 16,
-                frame = 1,
-                collidable = true,
-                consumable = true,
-                onConsume = function(player, gem)
-                    gSounds['pickup']:play()
-                    player:addScore(100)
-                end
-            })
-        end
-    end
-    for x = 10, arenaWidth - 15 do
-        if not lavaColumns[x]
-        and not castlePlatformColumns[x]
-        and (x < bowserCol - 5 or x > bowserCol + 5)
-        and math.random(18) == 1 then
-            local spawnY = (groundRow - 2) * TILE_SIZE
-            local enemy = Goomba {
-                texture = 'creatures',
-                x = (x - 1) * TILE_SIZE,
-                y = spawnY,
-                width = 16,
-                height = 16,
-                level = nil
-            }
-            table.insert(entities, enemy)
-        end
-    end
 
         local level26 = GameLevel(entities, objects, map, levelNum)
         level26.fireballs = level26.fireballs or {}
@@ -520,7 +409,7 @@ function LevelMaker.generate(width, height, levelNum)
             level = level26,
             dx = 25,
             minX = (bowserCol - 4) * TILE_SIZE,
-            maxX = (bowserCol + 4) * TILE_SIZE
+            maxX = (bowserCol + 1) * TILE_SIZE
         }
         table.insert(level26.entities, bowser)
 
@@ -930,6 +819,12 @@ function LevelMaker.generate(width, height, levelNum)
                             end
                         })
                     end
+                elseif y == height - 1 then
+                    -- Lava surface row
+                    table.insert(tiles[y], Tile(x, y, TILE_ID_LAVA_TOP, nil, tileset, topperset))
+                elseif y == height then
+                    -- Lava body row
+                    table.insert(tiles[y], Tile(x, y, TILE_ID_LAVA, nil, tileset, topperset))
                 else
                     table.insert(tiles[y], Tile(x, y, TILE_ID_EMPTY, nil, tileset, topperset))
                 end

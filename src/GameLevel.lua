@@ -10,7 +10,7 @@ end
 function GameLevel:clear()
     if self.objects then
         for i = #self.objects, 1, -1 do
-            if not self.objects[i] then
+            if self.objects[i].dead then
                 table.remove(self.objects, i)
             end
         end
@@ -18,7 +18,7 @@ function GameLevel:clear()
 
     if self.entities then
         for i = #self.entities, 1, -1 do
-            if not self.entities[i] then
+            if self.entities[i].dead then
                 table.remove(self.entities, i)
             end
         end

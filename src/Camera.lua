@@ -15,8 +15,8 @@ function Camera:update(dt, player, levelNum)
     local targetX = math.max(0, math.min(TILE_SIZE * self.mapWidth - VIRTUAL_WIDTH,
         player.x - (VIRTUAL_WIDTH / 2 - 8)))
 
-    local targetY = self.y
     local baselineY = math.max(0, (self.mapHeight * TILE_SIZE) - VIRTUAL_HEIGHT)
+    local targetY = 0
 
     if levelNum < 10 then
         baselineY = 0
@@ -29,8 +29,7 @@ function Camera:update(dt, player, levelNum)
         targetY = math.max(0, math.min(baselineY, 
             player.y - (VIRTUAL_HEIGHT / 2 - 8)))
     else
-        local idealY = player.y - (VIRTUAL_HEIGHT / 2 - 8)
-        targetY = math.max(self.y, math.max(0, math.min(baselineY, idealY)))
+        targetY = math.max(0, math.min(baselineY, player.y - (VIRTUAL_HEIGHT / 2 - 8)))
     end
 
     if math.abs(targetX - self.x) < 0.1 then

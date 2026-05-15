@@ -45,7 +45,7 @@ function Entity:render()
         love.graphics.draw(gTextures[self.texture], quad,
             math.floor(self.x) + self.width / 2,
             math.floor(self.y) + self.height / 2,
-            0, self.direction == 'left' and 1 or -1, 1,
+            0, self.direction == 'right' and 1 or -1, 1,
             self.width / 2, self.height / 2)
     end
     love.graphics.setColor(1, 1, 1, 1)

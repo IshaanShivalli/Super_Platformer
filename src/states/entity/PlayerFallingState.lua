@@ -20,10 +20,8 @@ function PlayerFallingState:update(dt)
     -- check if we've collided with any entities and kill them if so
     for k, entity in pairs(self.player.level.entities) do
         if entity:collides(self.player) then
-            -- If it's the boss, skip the generic instant-kill logic.
-            -- Boss HP and damage are handled in PlayState:update.
-            if entity.texture == 'donkey-kong' then
-                break
+            if entity.texture == 'donkey-kong' or entity.texture == 'bowser' then
+                goto next_entity
             end
 
             local entityTop = entity.y
@@ -48,6 +46,7 @@ function PlayerFallingState:update(dt)
             end
             return
         end
+        ::next_entity::
     end
 
     -- look at two tiles below our feet and check for collisions
