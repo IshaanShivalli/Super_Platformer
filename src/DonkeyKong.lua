@@ -184,7 +184,8 @@ function DonkeyKong:throwBarrel(player)
             interval = 0.1
         },
         dy = 0,
-        dx = rollSpeed -- Speed at which it rolls toward Mario
+        dx = rollSpeed,
+        direction = self.direction
     }
 
     -- Add the barrel to the level's object list

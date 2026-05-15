@@ -4,8 +4,8 @@ function Bowser:init(def)
     def.texture = 'bowser'
     Entity.init(self, def)
     self.class = 'Bowser'
-    self.hp = 15
-    self.maxHP = 15
+    self.hp = 20
+    self.maxHP = 20
     self.attackTimer = 0
     self.attackCooldown = 2
     self.hitTimer = 0
@@ -40,12 +40,12 @@ end
 function Bowser:update(dt)
     self.currentAnimation:update(dt)
 
-    if self.defeated or not self.active then
-        return
-    end
-
     if self.player then
         self.direction = (self.player.x < self.x) and 'left' or 'right'
+    end
+
+    if self.defeated or not self.active then
+        return
     end
 
     self.x = self.x + self.dx * dt

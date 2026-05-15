@@ -342,7 +342,7 @@ function PlayState:update(dt)
             end
 
             self.rocketTimer = self.rocketTimer + dt
-            if dk and dk.hp <= 3 then
+            if dk and not dk.defeated and dk.hp < 5 then
                 if self.rocketTimer > 6 then
                     self.rocketTimer = 0
                     for _, obj in pairs(self.level.objects) do
