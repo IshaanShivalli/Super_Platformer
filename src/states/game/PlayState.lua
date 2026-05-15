@@ -165,7 +165,7 @@ function PlayState:update(dt)
             if e.texture == 'bowser' then bowser = e break end
         end
 
-        if self.player.x > lockThreshold then
+        if self.player.x > lockThreshold and bowser and not bowser.defeated then
             self.lockedCamX = lockThreshold
             
             if not self.bowserIntro then
@@ -192,7 +192,15 @@ function PlayState:update(dt)
         end
 
         for _, entity in pairs(self.level.entities) do
-            if entity.isMushroomFriend and self.player:collides(entity) and not self.transitioning then
+            local isFriend = entity.texture == 'princess' or entity.texture == 'mushroom-friend'
+            if isFriend and self.player:collides(entity) and not self.transitioning then
+                self:triggerBowserVictory()
+                break
+            end
+        end
+
+        for _, object in pairs(self.level.objects) do
+            if object.texture == 'luigi' and self.player:collides(object) and not self.transitioning then
                 self:triggerBowserVictory()
                 break
             end
@@ -460,6 +468,7 @@ function PlayState:update(dt)
                 for _, obj in pairs(self.level.objects) do
                     if obj.isGate then obj.dead = true end
                 end
+                self.lockedCamX = nil
             end
         end
     end
@@ -523,8 +532,11 @@ function PlayState:update(dt)
         local hitEnemy = false
         for j = #self.level.entities, 1, -1 do
             local enemy = self.level.entities[j]
-            if enemy.class ~= 'DonkeyKong' and enemy.texture ~= 'bowser' and fireball:collides(enemy) then
-                enemy:takeDamage()
+            local isFriend = enemy.texture == 'princess' or enemy.texture == 'mushroom-friend'
+            if enemy.class ~= 'DonkeyKong' and enemy.texture ~= 'bowser' and not isFriend and fireball:collides(enemy) then
+                if enemy.takeDamage then
+                    enemy:takeDamage()
+                end
                 fireball.dead = true 
                 hitEnemy = true
                 break
