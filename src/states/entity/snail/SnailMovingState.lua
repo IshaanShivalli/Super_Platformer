@@ -4,6 +4,7 @@ function SnailMovingState:init(tilemap, player, snail)
     self.tilemap = tilemap
     self.player = player
     self.snail = snail
+    self.name = 'moving'
 
     self.movingDirection = math.random(2) == 1 and 'left' or 'right'
     self.snail.direction = self.movingDirection
@@ -26,7 +27,9 @@ function SnailMovingState:update(dt)
 
     if (tileBottomLeft and tileBottomLeft:collidable()) or (tileBottomRight and tileBottomRight:collidable()) then
         self.snail.dy = 0
-        self.snail.y = (tileBottomLeft and tileBottomLeft.y or tileBottomRight.y) * TILE_SIZE - self.snail.height - TILE_SIZE
+        -- Improved snapping to prevent sinking into ground
+        local floorY = (tileBottomLeft and tileBottomLeft.y or tileBottomRight.y)
+        self.snail.y = (floorY - 1) * TILE_SIZE - self.snail.height
     end
 
     -- Vertical collision with solid GameObjects (Platforms)
@@ -74,8 +77,13 @@ function SnailMovingState:update(dt)
         -- Check for pipe collisions at the predicted position
         if self.level and self.level.objects then
             for _, object in pairs(self.level.objects) do
-                if (object.texture == 'pipes' or object.texture == 'pyramid' or object.texture == 'toppers' or object.class == Pipe) and object.solid and 
-                   object:collides({x = nextX, y = self.snail.y, width = self.snail.width, height = self.snail.height}) then
+                if object.solid and 
+                   object:collides({
+                       x = nextX, 
+                       y = self.snail.y + 4, -- Shrink collision box vertically
+                       width = self.snail.width, 
+                       height = self.snail.height - 8
+                   }) then
                     pipeCollision = true
                     break
                 end
@@ -111,9 +119,19 @@ function SnailMovingState:update(dt)
                 local tileLeft = self.tilemap:pointToTile(self.snail.x, self.snail.y)
                 local tileBottomLeft = self.tilemap:pointToTile(self.snail.x, self.snail.y + self.snail.height)
 
+                -- Check for solid GameObjects (bricks/platforms) under the left edge
+                local groundObjectBelow = false
+                for _, object in pairs(self.level.objects) do
+                    if object.solid and self.snail.x >= object.x and self.snail.x < object.x + object.width and
+                       math.abs((self.snail.y + self.snail.height) - object.y) < 5 then
+                        groundObjectBelow = true
+                        break
+                    end
+                end
+
                 -- For underground levels, allow falling. Only reverse if hitting a solid wall.
                 local shouldReverse = (tileLeft and tileLeft:collidable()) or entityCollision
-                shouldReverse = shouldReverse or (tileBottomLeft and not tileBottomLeft:collidable()) -- Always check ledges for better patrol
+                shouldReverse = shouldReverse or (not groundObjectBelow and (tileBottomLeft and not tileBottomLeft:collidable()))
                 if shouldReverse then
                     self.snail.x = self.snail.x - dx -- Revert x movement
 
@@ -127,9 +145,19 @@ function SnailMovingState:update(dt)
                 local tileRight = self.tilemap:pointToTile(self.snail.x + self.snail.width, self.snail.y)
                 local tileBottomRight = self.tilemap:pointToTile(self.snail.x + self.snail.width, self.snail.y + self.snail.height)
 
+                -- Check for solid GameObjects (bricks/platforms) under the right edge
+                local groundObjectBelow = false
+                for _, object in pairs(self.level.objects) do
+                    if object.solid and (self.snail.x + self.snail.width) > object.x and (self.snail.x + self.snail.width) <= object.x + object.width and
+                       math.abs((self.snail.y + self.snail.height) - object.y) < 5 then
+                        groundObjectBelow = true
+                        break
+                    end
+                end
+
                 -- For underground levels, allow falling. Only reverse if hitting a solid wall.
                 local shouldReverse = (tileRight and tileRight:collidable()) or entityCollision
-                shouldReverse = shouldReverse or (tileBottomRight and not tileBottomRight:collidable()) -- Always check ledges for better patrol
+                shouldReverse = shouldReverse or (not groundObjectBelow and (tileBottomRight and not tileBottomRight:collidable()))
                 if shouldReverse then
                     self.snail.x = self.snail.x - dx -- Revert x movement
 

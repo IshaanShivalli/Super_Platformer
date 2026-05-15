@@ -2,19 +2,15 @@ PlayerFallingState = Class{__includes = BaseState}
 
 function PlayerFallingState:init(player, gravity)
     self.player = player
+    self.name = 'falling'
     self.gravity = gravity
     self.animation = Animation {
-        frames = {1},
+        frames = {5},
         interval = 1
     }
-    self.player.currentAnimation = self.animation
 end
 
 function PlayerFallingState:update(dt)
-    self.player.currentAnimation:update(dt)
-
-    if self.player.controlLock then return end
-
     local previousY = self.player.y
     self.player.dy = self.player.dy + self.gravity * dt
     self.player.y = self.player.y + (self.player.dy * dt)
@@ -32,20 +28,15 @@ function PlayerFallingState:update(dt)
 
             local entityTop = entity.y
 
-            if previousBottom <= entityTop + 2 and currentBottom >= entityTop then
+            -- Forgiving stomp: allow a larger vertical buffer for corner hits
+            if previousBottom <= entityTop + 8 and currentBottom >= entityTop then
                 gSounds['kill']:play()
                 gSounds['kill2']:play()
-                self.player.score = self.player.score + 100
+                self.player:addScore(100)
                 
-                if entity.class == 'Goomba' then
-                    entity:squish()
-                    -- Remove after squish animation plays (assuming squishAnimation.interval * frames is total duration)
-                    Timer.after(entity.squishAnimation.interval * #entity.squishAnimation.frames, function()
-                        table.remove(self.player.level.entities, k)
-                    end)
-                else
-                    table.remove(self.player.level.entities, k)
-                end
+                -- Remove the entity immediately on hit
+                table.remove(self.player.level.entities, k)
+                self.player.invincibleTimer = 0.1 -- Tiny window to avoid double-hit death
 
                 -- Bounce off the enemy and transition to jump state
                 self.player:changeState('jump', {
@@ -53,8 +44,7 @@ function PlayerFallingState:update(dt)
                     playSound = false
                 })
             else
-                gSounds['death']:play()
-                gStateMachine:change('start')
+                self.player:takeHit()
             end
             return
         end
@@ -76,19 +66,50 @@ function PlayerFallingState:update(dt)
         end
 
         self.player.y = (tileBottomLeft.y - 1) * TILE_SIZE - self.player.height
-        return  -- Important: return after handling tile collision
-    elseif self.player.y > self.player.map.height * TILE_SIZE then
-        gSounds['death']:play()
-        gStateMachine:change('start')
         return
-    elseif love.keyboard.isDown('left') then
-        self.player.direction = 'left'
-        self.player.x = self.player.x - PLAYER_WALK_SPEED * dt
-        self.player:checkLeftCollisions(dt)
-    elseif love.keyboard.isDown('right') then
-        self.player.direction = 'right'
-        self.player.x = self.player.x + PLAYER_WALK_SPEED * dt
-        self.player:checkRightCollisions(dt)
+    -- Head collision check for underwater levels where Mario can swim upward (dy < 0)
+    elseif self.player.dy < 0 then
+        local tileTopLeft = self.player.map:pointToTile(self.player.x + 3, self.player.y)
+        local tileTopRight = self.player.map:pointToTile(self.player.x + self.player.width - 3, self.player.y)
+
+        if (tileTopLeft and tileTopLeft:collidable()) or (tileTopRight and tileTopRight:collidable()) then
+            local collisionTile = tileTopLeft or tileTopRight
+            -- Snap to the bottom of the tile we hit
+            self.player.y = collisionTile.y * TILE_SIZE
+            self.player.dy = 0
+        end
+    elseif self.player.y > self.player.map.height * TILE_SIZE then
+        self.player.lives = self.player.lives - 1
+        gSounds['death']:play()
+        if self.player.controlLock then self.player.controlLock = false end
+        if self.player.lives <= 0 then
+            love.filesystem.write('lvls', "1")
+            gStateMachine:change('start')
+        else
+            gStateMachine:change('play', {
+                levelNum = self.player.level.levelNum,
+                score = self.player.score,
+                lives = self.player.lives,
+                powerupState = self.player.powerupState
+            })
+        end
+        return
+    end
+
+    if not self.player.controlLock then
+        if love.keyboard.isDown('left') then
+            self.player.direction = 'left'
+            self.player.x = self.player.x - PLAYER_WALK_SPEED * dt
+            self.player:checkLeftCollisions(dt)
+        elseif love.keyboard.isDown('right') then
+            self.player.direction = 'right'
+            self.player.x = self.player.x + PLAYER_WALK_SPEED * dt
+            self.player:checkRightCollisions(dt)
+        end
+    end
+
+    if self.player:canPerformOverworldJump() and (love.keyboard.wasPressed('space') or love.keyboard.wasPressed('up')) then
+        self.player:changeState('jump')
     end
 
     -- Check pipe collisions FIRST before other objects
@@ -134,6 +155,11 @@ function PlayerFallingState:update(dt)
                     self.player:changeState('idle')
                 end
                 return
+            -- Hitting from below (Ceiling) - essential for underwater platforms
+            elseif self.player.dy < 0 and (self.player.y + 4 >= object.y + object.height) then
+                self.player.y = object.y + object.height
+                self.player.dy = 0
+                if object.onCollide then object.onCollide(object) end
             end
         end
     end

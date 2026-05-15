@@ -4,8 +4,8 @@ function Entity:init(def)
     self.x = def.x
     self.y = def.y
 
-    self.dx = 0
-    self.dy = 0
+    self.dx = def.dx or 0
+    self.dy = def.dy or 0
 
     self.width = def.width
     self.height = def.height
@@ -15,6 +15,8 @@ function Entity:init(def)
 
     self.direction = 'left'
     self.opacity = 1
+    
+    self.animations = def.animations
 
     self.map = def.map
     self.level = def.level
@@ -25,7 +27,9 @@ function Entity:changeState(state, params)
 end
 
 function Entity:update(dt)
-    self.stateMachine:update(dt)
+    if self.stateMachine then
+        self.stateMachine:update(dt)
+    end
 end
 
 function Entity:collides(entity)
@@ -35,12 +39,13 @@ end
 
 function Entity:render()
     love.graphics.setColor(1, 1, 1, self.opacity or 1)
-    local quad = gFrames[self.texture][self.currentAnimation:getCurrentFrame()]
+    -- Safety check for currentAnimation to prevent invisibility if not set
+    local quad = gFrames[self.texture][self.currentAnimation and self.currentAnimation:getCurrentFrame() or 1]
     if quad then
         love.graphics.draw(gTextures[self.texture], quad,
             math.floor(self.x) + self.width / 2,
             math.floor(self.y) + self.height / 2,
-            0, self.direction == 'right' and 1 or -1, 1,
+            0, self.direction == 'left' and 1 or -1, 1,
             self.width / 2, self.height / 2)
     end
     love.graphics.setColor(1, 1, 1, 1)

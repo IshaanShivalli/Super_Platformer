@@ -1,10 +1,9 @@
 StartState = Class{__includes = BaseState}
 
 function StartState:init()
-    -- Check if a save file exists and load the level number
     if love.filesystem.getInfo('lvls') then
         local content, size = love.filesystem.read('lvls')
-        self.savedLevel = tonumber(content) or 1
+        self.savedLevel = tonumber(string.match(content, '^(%d+)')) or 1
     else
         self.savedLevel = 1
     end
@@ -17,15 +16,26 @@ function StartState:update(dt)
     if love.keyboard.wasPressed('enter') or love.keyboard.wasPressed('return') then
         gStateMachine:change('play', {
             levelNum = self.savedLevel,
-            score = 0
+            score = 0,
+            lives = 3,
+            powerupState = PLAYER_STATE_SMALL
         })
     end
 end
 
 function StartState:render()
-    love.graphics.draw(gTextures['backgrounds'], gFrames['backgrounds'][self.background], 0, 0)
-    love.graphics.draw(gTextures['backgrounds'], gFrames['backgrounds'][self.background], 0,
-        VIRTUAL_HEIGHT, 0, 1, -1)
+    if self.savedLevel < 10 then
+        love.graphics.draw(gTextures['backgrounds'], gFrames['backgrounds'][self.background], 0, 0)
+        love.graphics.draw(gTextures['backgrounds'], gFrames['backgrounds'][self.background], 0,
+            VIRTUAL_HEIGHT, 0, 1, -1)
+    elseif self.savedLevel >= 21 then
+        for bgX = 0, VIRTUAL_WIDTH, 16 do
+            love.graphics.draw(gTextures['underwater-topper'], gFrames['underwater-topper'][1], bgX, 0)
+            for bgY = 16, VIRTUAL_HEIGHT, 16 do
+                love.graphics.draw(gTextures['underwater-bg'], gFrames['underwater-bg'][1], bgX, bgY)
+            end
+        end
+    end
     self.map:render()
 
     love.graphics.setFont(gFonts['title'])

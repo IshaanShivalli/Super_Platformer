@@ -2,6 +2,7 @@ Snail = Class{__includes = Entity}
 
 function Snail:init(def)
     Entity.init(self, def)
+    self.class = 'Snail'
 
     self.walkAnimation = Animation {
         frames = {1, 2},
@@ -16,18 +17,29 @@ function Snail:init(def)
         interval = 1
     }
     self.currentAnimation = self.walkAnimation -- Default
+    self.dead = false -- New property to mark for removal
 end
 
 function Snail:update(dt)
     -- Update the state machine first
-    Entity.update(self, dt)
+    if self.stateMachine then
+        Entity.update(self, dt)
+    end
 
     -- Then set animation based on current state
-    if self.stateMachine.current.name == 'moving' then
-        self.currentAnimation = self.walkAnimation
-    elseif self.stateMachine.current.name == 'chasing' then
-        self.currentAnimation = self.chaseAnimation
-    elseif self.stateMachine.current.name == 'idle' then
+    if self.dead then
+        return -- Don't update if dead, PlayState will remove it
+    end
+
+    if self.stateMachine and self.stateMachine.current then
+        if self.stateMachine.current.name == 'moving' then
+            self.currentAnimation = self.walkAnimation
+        elseif self.stateMachine.current.name == 'chasing' then
+            self.currentAnimation = self.chaseAnimation
+        elseif self.stateMachine.current.name == 'idle' then
+            self.currentAnimation = self.idleAnimation
+        end
+    else
         self.currentAnimation = self.idleAnimation
     end
     self.currentAnimation:update(dt) -- Update the chosen animation
@@ -45,4 +57,9 @@ function Snail:render()
     end
 
     self:renderHitbox(0, 1, 0, 1)
+end
+
+function Snail:takeDamage()
+    gSounds['kill']:play() -- Or a specific enemy hit sound
+    self.dead = true -- Mark for removal
 end

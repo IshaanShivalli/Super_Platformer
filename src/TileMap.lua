@@ -7,7 +7,15 @@ function TileMap:init(width, height)
 end
 
 function TileMap:update(dt)
-
+    -- Tick every tile so animated tiles (lava, etc.) can advance their frame timers
+    for y = 1, self.height do
+        for x = 1, self.width do
+            local tile = self.tiles[y][x]
+            if tile and tile.update then
+                tile:update(dt)
+            end
+        end
+    end
 end
 
 function TileMap:pointToTile(x, y)

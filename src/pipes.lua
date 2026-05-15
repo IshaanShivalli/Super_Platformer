@@ -12,6 +12,9 @@ function Pipe:init(def)
         frames = {1, 2},
         interval = 0.15
     }
+
+    -- Start the plant hidden inside the pipe body so it can rise up visibly
+    self.plantY = self.y + self.height - 16
 end
 
 function Pipe:cyclePlant()

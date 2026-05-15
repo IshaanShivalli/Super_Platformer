@@ -1,4 +1,4 @@
-PlayState = Class{__includes = BaseState}
+﻿PlayState = Class{__includes = BaseState}
 
 function PlayState:init(params)
     self.camX = 0
@@ -11,40 +11,69 @@ function PlayState:init(params)
     self.transitioning = false
     self.showHUD = true
     self.fadeOpacity = 1
-    self.shakeAmount = 0
+    self.fireballs = {}
+    self.rockets = {}
+    self.rocketTimer = 0
+    self.bowserIntro = false
 end
 
 function PlayState:enter(params)
-    self.levelNum = params and params.levelNum or 1
+    local initialLevelNum = params and params.levelNum or 1
+    local initialPowerupState = PLAYER_STATE_SMALL
     
-    -- Persist the current level number to the 'lvls' file
-    love.filesystem.write('lvls', tostring(self.levelNum))
+    if params == nil then
+        if love.filesystem.getInfo('lvls') then
+            local content, size = love.filesystem.read('lvls')
+            local levelStr = string.match(content, "^(%d+)") 
+            initialLevelNum = tonumber(levelStr) or 1
+        end
+    else
+        initialLevelNum = params.levelNum or 1
+        initialPowerupState = params.powerupState or PLAYER_STATE_SMALL
+    end
 
+    self.levelNum = initialLevelNum
     self.showHUD = true
     self.transitioning = false
     self.lockedCamX = nil
-    local levelHeight = self.levelNum >= UNDERGROUND_LEVEL_START and 16 or 20
-    self.level = LevelMaker.generate(self.levelNum >= UNDERGROUND_LEVEL_START and 30 or (100 + (self.levelNum - 1) * 20), levelHeight, self.levelNum)
-    self.tileMap = self.level.tileMap
-
-    self.camera = Camera(self.tileMap.width, levelHeight, self.levelNum)
-
-    local startPipeX = 8
-    -- Align feet perfectly with the pipe floor (Pipe bottom is 96, Mario height is 15)
-    local startPipeY = (7 - 3) * TILE_SIZE + 17
     
-    -- Fade in from black
+    local mapWidth = 80 + (self.levelNum - 1) * 20
+    if self.levelNum >= UNDERGROUND_LEVEL_START and self.levelNum < 21 then
+        mapWidth = 250 + (self.levelNum - UNDERGROUND_LEVEL_START) * 50
+    elseif self.levelNum >= 21 and self.levelNum <= 25 then
+        mapWidth = 150 
+    elseif self.levelNum == 26 then 
+        mapWidth = 120 
+    end
+
+    if self.levelNum >= 21 and self.levelNum <= 25 then
+        self.gravityAmount = 300
+    end
+
+    local mapHeight = 12
+    self.level = LevelMaker.generate(mapWidth, mapHeight, self.levelNum)
+
+    if not self.level then
+        self.level = LevelMaker.generate(mapWidth, mapHeight, 1)
+    end
+
+    self.level.fireballs = self.fireballs 
+    self.tileMap = self.level.tileMap
+    self.camera = Camera(self.tileMap.width, self.tileMap.height, self.levelNum)
+
+    local startPipeY = (7 - 3) * TILE_SIZE + 16
+
     Timer.tween(1, {
         [self] = {fadeOpacity = 0}
     })
 
     self.player = Player({
-        -- If it's the underground level, start Mario at the beginning of the map
-        x = self.levelNum >= UNDERGROUND_LEVEL_START and TILE_SIZE * 2 or startPipeX, -- Start at the top-left of the underground
+        x = self.levelNum >= UNDERGROUND_LEVEL_START and TILE_SIZE * 5 or startPipeX, 
         y = self.levelNum >= UNDERGROUND_LEVEL_START and (7 - 1) * TILE_SIZE - 15 or startPipeY,
-        -- For underground, we don't want the pipe spawn animation
-        controlLock = self.levelNum >= UNDERGROUND_LEVEL_START and false or true,
-        width = 14.86, height = 15,
+        controlLock = self.levelNum >= UNDERGROUND_LEVEL_START and false or true, 
+        lives = params and params.lives or 3, 
+        powerupState = params and params.powerupState or PLAYER_STATE_SMALL, 
+        width = 14.8, height = 14.8,
         score = params and params.score or 0,
         texture = 'green-alien',
         stateMachine = StateMachine {
@@ -56,30 +85,42 @@ function PlayState:enter(params)
         map = self.tileMap,
         level = self.level
     })
-    self.player:changeState('idle') -- Initialize player's animation state immediately (Fix for nil currentAnimation)
-    
-    -- Give the level a reference to the player so objects can check proximity
+    self.player:changeState('idle') 
+
     self.level.player = self.player
 
+    if self.levelNum == 26 then
+        for _, entity in pairs(self.level.entities) do
+            if entity.texture == 'bowser' then
+                entity.level = self.level
+                entity.level.fireballs = self.fireballs
+                entity.player = self.player
+            end
+        end
+    end
+
     self:spawnEnemies()
-    
-    -- Spawn animation: start inside the pipe and walk out (only for non-underground levels)
+
     if self.levelNum < 11 then
+        self.player.opacity = 0 
         self.player.controlLock = true
         self.player.direction = 'right'
         self.player.dy = 0
         self.player:changeState('walking')
+        
         Timer.tween(1.5, {
             [self.player] = {x = 45}
         }):finish(function()
             self.player.controlLock = false
             self.player:changeState('idle')
         end)
+
+        Timer.after(1.0, function()
+            Timer.tween(0.3, { [self.player] = { opacity = 1 } })
+        end)
     end
 
-    -- Level 10 Conversation Trigger
-    if self.levelNum == 10 then
-        -- Stop music for the boss fight
+    if self.levelNum == 10 or self.levelNum == 20 then
         gSounds['music']:stop()
 
         self.player.controlLock = true
@@ -87,43 +128,124 @@ function PlayState:enter(params)
             function(go) Timer.after(1, go) end,
             function(go) 
                 gSounds['dk-roar']:play()
-                self.shakeAmount = 10 -- Add a roar shake
                 self.dialogueText = "Donkey Kong: RAWR! You dare enter my arena?" Timer.after(2, go) 
             end,
             function(go) self.dialogueText = "Mario: It's-a me! Let's settle this!" Timer.after(2, go) end,
             function(go) self.dialogueText = nil self.player.controlLock = false go() end
         )()
+    elseif self.levelNum >= UNDERGROUND_LEVEL_START then
+        if not gSounds['music']:isPlaying() then
+            gSounds['music']:play()
+            gSounds['music']:setLooping(true)
+        end
     end
 end
 
 function PlayState:update(dt)
+    dt = math.min(dt, 0.033) 
     Timer.update(dt)
 
-    if self.shakeAmount > 0 then
-        self.shakeAmount = math.max(0, self.shakeAmount - 60 * dt)
+    self.level:clear()
+
+    if self.level.objects then
+        for i = #self.level.objects, 1, -1 do
+            if self.level.objects[i].dead then
+                table.remove(self.level.objects, i)
+            end
+        end
     end
 
-    self.level:clear()
     self.player:update(dt)
     self.level:update(dt)
 
-    -- Level 10 Combat and Barrel Logic
-    if self.levelNum == 10 then
+    if self.levelNum == 26 then
+        local lockThreshold = 85 * TILE_SIZE
+        local bowser = nil
+        for _, e in pairs(self.level.entities) do
+            if e.texture == 'bowser' then bowser = e break end
+        end
+
+        if self.player.x > lockThreshold then
+            self.lockedCamX = lockThreshold
+            
+            if not self.bowserIntro then
+                self.bowserIntro = true
+                self.player.controlLock = true
+                Chain(
+                    function(go)
+                        self.dialogueText = "Bowser: Gwa ha ha! You've reached the end of the line, Mario!"
+                        Timer.after(2.5, go)
+                    end,
+                    function(go) self.dialogueText = "Mario: Where are my friends?!" Timer.after(2, go) end,
+                    function(go) self.dialogueText = "Bowser: They're my guests of honor... forever!" Timer.after(2, go) end,
+                    function(go) self.dialogueText = nil self.player.controlLock = false go() end
+                )()
+            end
+        end
+
+        if self.lockedCamX then
+            self.player.x = math.max(self.player.x, self.lockedCamX)
+            
+            if bowser and not bowser.defeated then
+                self.player.x = math.min(self.player.x, self.lockedCamX + VIRTUAL_WIDTH - self.player.width)
+            end
+        end
+
         for _, entity in pairs(self.level.entities) do
-            -- Only damage if it's DK and he isn't currently in hit-stun
+            if entity.isMushroomFriend and self.player:collides(entity) and not self.transitioning then
+                self:triggerBowserVictory()
+                break
+            end
+        end
+    end
+
+    if not self.player.controlLock and (self.player.invincibleTimer or 0) <= 0 then
+        local corners = {
+            {self.player.x + 2,                     self.player.y + self.player.height - 1},
+            {self.player.x + self.player.width - 2, self.player.y + self.player.height - 1},
+        }
+        for _, pt in ipairs(corners) do
+            local tile = self.tileMap:pointToTile(pt[1], pt[2])
+            if tile and (tile.id == TILE_ID_LAVA or tile.id == TILE_ID_LAVA_TOP) then
+                self.player:takeHit()
+                break
+            end
+        end
+        for _, obj in pairs(self.level.objects) do
+            if obj.isLava and obj:collides(self.player) then
+                self.player:takeHit()
+                break
+            end
+        end
+    end
+
+    if self.levelNum >= 21 and self.levelNum <= 25 then
+        if love.keyboard.wasPressed('space') or love.keyboard.wasPressed('up') then
+            self.player.dy = -150
+            gSounds['jump']:play()
+        end
+
+        if self.player.y < 0 then
+            self.player.y = 0
+            self.player.dy = 0
+        end
+    else
+        self.gravityAmount = 900 
+    end
+
+    if self.levelNum == 10 or self.levelNum == 20 then
+        for _, entity in pairs(self.level.entities) do
             if entity.texture == 'donkey-kong' and self.player:collides(entity) and not entity.defeated then
-                -- Mario damages DK by jumping on his head (top 15px of the 28px sprite)
-                -- We check hitTimer here so he can still kill Mario if not in hit-stun
+                
                 if self.player.dy > 0 and self.player.y + self.player.height <= entity.y + 15 and (entity.hitTimer or 0) <= 0 then
                     gSounds['kill']:play()
                     gSounds['dk-hit']:play()
-                    self.shakeAmount = 5
 
                     entity.hp = entity.hp - 1
-                    -- Apply 0.8s of invulnerability to prevent multi-hits
+                    
                     entity.hitTimer = 0.8 
 
-                    -- Determine knockback direction based on player's position relative to boss center
+                    
                     local playerMid = self.player.x + self.player.width / 2
                     local bossMid = entity.x + entity.width / 2
                     local knockDir = playerMid < bossMid and -1 or 1
@@ -132,8 +254,9 @@ function PlayState:update(dt)
                         velocity = -280,
                         playSound = false
                     })
+                    self.player.invincibleTimer = 0.1 
 
-                    -- Apply slight horizontal and upward knockback impulse
+                    
                     Timer.tween(0.2, {
                         [self.player] = {x = self.player.x + (knockDir * 48)}
                     })
@@ -145,24 +268,18 @@ function PlayState:update(dt)
                         local floorY = (7 - 1) * TILE_SIZE
                         local pipeX = entity.x + 64
                         
-                        -- Create the pipe initially hidden below ground
                         local victoryPipe = GameObject {
                             texture = 'pipes',
                             x = pipeX,
-                            y = VIRTUAL_HEIGHT, -- Start off-screen at the bottom
+                            y = VIRTUAL_HEIGHT, 
                             width = 32,
-                            height = VIRTUAL_HEIGHT, -- Make it extend to the full map height
+                            height = 48, 
                             frame = 1,
-                            collidable = false, -- Fix: This pipe should not block Mario's movement
-                            solid = false, -- Fix: No longer blocks Mario horizontally
+                            collidable = false, 
+                            solid = false, 
                             isVictoryPipe = true,
                             render = function(svc)
-                                -- Draw the pipe head
-                                love.graphics.draw(gTextures['pipes'], gFrames['pipes'][svc.frame], svc.x, svc.y) -- Use svc.frame for the head
-                                local pipeBodyQuad = gFrames['pipes'][2] or gFrames['pipes'][1] -- Use frame 1 as fallback if frame 2 doesn't exist
-                                for bodyY = svc.y + 48, VIRTUAL_HEIGHT + 200, 48 do -- Extend beyond screen for seamless look
-                                    love.graphics.draw(gTextures['pipes'], pipeBodyQuad, svc.x, bodyY)
-                                end
+                                love.graphics.draw(gTextures['pipes'], gFrames['pipes'][svc.frame], svc.x, svc.y)
                             end
                         }
                         table.insert(self.level.objects, victoryPipe)
@@ -178,14 +295,12 @@ function PlayState:update(dt)
                             end,
                             function(go) 
                                 entity.direction = 'right'
-                                Timer.tween(1.5, {[entity] = {x = pipeX + 8}}):finish(go) 
+                                Timer.tween(1.5, {[entity] = {x = pipeX + 2}}):finish(go) 
                             end,
                             function(go) 
-                                -- Donkey Kong walks "down" inside the pipe and off-screen
                                 Timer.tween(0.8, {[entity] = {y = VIRTUAL_HEIGHT}}):finish(go) 
                             end,
                             function(go)
-                                -- Spawn gems around the pipe, not inside it
                                 for i = 1, 8 do
                                     local side = math.random(0, 1) == 0 and -1 or 1
                                     local spawnX = pipeX + (side == -1 and math.random(-48, -10) or math.random(42, 80))
@@ -195,7 +310,7 @@ function PlayState:update(dt)
                                         y = floorY - 16 - math.random(0, 32),
                                         width = 9, height = 16, frame = 1,
                                         collidable = true, consumable = true,
-                                        onConsume = function(p, gem) gSounds['pickup']:play() p.score = p.score + 100 end
+                                        onConsume = function(p, gem) gSounds['pickup']:play() p:addScore(100) end
                                     })
                                 end
                                 self.player.controlLock = false
@@ -204,38 +319,91 @@ function PlayState:update(dt)
                         )()
                     end
                 elseif not self.player.controlLock and (entity.hitTimer or 0) <= 0 then
-                    gSounds['death']:play()
-                    gStateMachine:change('start')
+                    self.player:takeHit()
+                    return 
                 end
             end
         end
 
-        -- Barrel Collision and Movement
+        if self.levelNum == 20 then
+            local dk = nil
+            for _, e in pairs(self.level.entities) do
+                if e.texture == 'donkey-kong' then dk = e break end
+            end
+
+            self.rocketTimer = self.rocketTimer + dt
+            if dk and dk.hp <= 3 then
+                if self.rocketTimer > 6 then
+                    self.rocketTimer = 0
+                    for _, obj in pairs(self.level.objects) do
+                        if obj.texture == 'Cannon' then
+                            local direction = obj.x < self.tileMap.width * TILE_SIZE / 2 and 1 or -1
+                            table.insert(self.rockets, {
+                                texture = 'Rocket',
+                                x = direction == 1 and obj.x + 16 or obj.x - 16,
+                                y = obj.y + 4, 
+                                width = 16, height = 14,
+                                dx = direction * 80,
+                                frame = 1
+                            })
+                            gSounds['dk-throw']:play()
+                        end
+                    end
+                end
+            end
+        end
+
+        for i = #self.rockets, 1, -1 do
+            local r = self.rockets[i]
+            r.x = r.x + r.dx * dt
+            if self.player:collides(r) and not self.player.controlLock then
+                local previousBottom = (self.player.y + self.player.height) - (self.player.dy * dt)
+                local currentBottom = self.player.y + self.player.height
+                local rTop = r.y
+
+                local isStomp = (self.player.dy > 0 and previousBottom <= rTop + 8 and currentBottom >= rTop) or
+                                (self.player.dy <= 0 and currentBottom <= rTop + 4)
+
+                if isStomp then
+                    gSounds['kill']:play()
+                    self.player:addScore(100)
+                    table.remove(self.rockets, i)
+                    self.player:changeState('jump', {
+                        velocity = -200,
+                        playSound = false
+                    })
+                else
+                    self.player:takeHit()
+                    table.remove(self.rockets, i)
+                end
+            elseif r.x < -16 or r.x > self.tileMap.width * TILE_SIZE then
+                table.remove(self.rockets, i)
+            end
+        end
+
         for i = #self.level.objects, 1, -1 do
             local object = self.level.objects[i]
             if object.isBarrel then
-                -- Apply gravity and bouncing
                 object.dy = (object.dy or 0) + self.gravityAmount * dt
                 object.x = object.x + (object.dx or 0) * dt
                 object.y = object.y + object.dy * dt
 
-                -- Update barrel animation
                 if object.animation then
                     object.animation:update(dt)
                     object.frame = object.animation:getCurrentFrame()
                 end
 
-                -- Floor check (Row 7)
+                
                 local groundY = (7 - 1) * TILE_SIZE
                 if object.y + object.height >= groundY then
                     object.y = groundY - object.height
-                    object.dy = -120 -- Bounce velocity
+                    object.dy = -120 
                 end
 
-                -- Collision with player
+
                 if self.player:collides(object) and not self.player.controlLock then
-                    gSounds['death']:play()
-                    gStateMachine:change('start')
+                    self.player:takeHit()
+                    return
                 end
 
                 if object.x < -object.width or object.x > self.tileMap.width * TILE_SIZE then
@@ -243,43 +411,173 @@ function PlayState:update(dt)
                 end
             end
         end
+    end
+    
+    if self.levelNum == 26 then
+        local bowser = nil
+        for _, e in pairs(self.level.entities) do
+            if e.texture == 'bowser' then bowser = e break end
+        end
 
-        -- Proximity check for Mario entering the victory pipe
-        for _, object in pairs(self.level.objects) do
-            if object.isVictoryPipe and math.abs((self.player.x + self.player.width/2) - (object.x + object.width/2)) < 12 
-               and math.abs((self.player.y + self.player.height) - object.y) <= 8
-               and not self.transitioning and not self.player.controlLock then
+        if bowser then
+            if self.player:collides(bowser) and not self.player.controlLock and not bowser.defeated then
                 
-                self.transitioning = true
-                self.player.controlLock = true
-                self.player.x = object.x + object.width/2 - self.player.width/2
-                
-                Timer.tween(1.0, {
-                    [self.player] = {y = object.y + object.height}
-                }):finish(function()
-                    gStateMachine:change('play', {
-                        levelNum = self.levelNum + 1,
-                        score = self.player.score + 1000
+                if self.player.dy > 0 and self.player.y + self.player.height <= bowser.y + 10 and (bowser.hitTimer or 0) <= 0 then
+                    gSounds['kill']:play()
+                    bowser:takeDamage()
+
+                    bowser.hitTimer = 0.8
+
+                    local playerMid = self.player.x + self.player.width / 2
+                    local bossMid = bowser.x + bowser.width / 2
+                    local knockDir = playerMid < bossMid and -1 or 1
+
+                    self.player:changeState('jump', {
+                        velocity = -280,
+                        playSound = false
                     })
-                end)
+                    self.player.invincibleTimer = 0.1
+
+                    Timer.tween(0.2, {
+                        [self.player] = {x = self.player.x + (knockDir * 48)}
+                    })
+                else
+                    self.player:takeHit()
+                end
+            end
+
+            for i = #self.fireballs, 1, -1 do
+                local fireball = self.fireballs[i]
+                if fireball.player == self.player and fireball:collides(bowser) and not bowser.defeated and (bowser.hitTimer or 0) <= 0 then
+                    gSounds['kill']:play()
+                    bowser:takeDamage()
+                    bowser.hitTimer = 0.8
+                    fireball.dead = true
+                end
+            end
+
+            if bowser.defeated then
+                for _, obj in pairs(self.level.objects) do
+                    if obj.isGate then obj.dead = true end
+                end
+            end
+        end
+    end
+    
+    for _, object in pairs(self.level.objects) do
+        if object.isVictoryPipe and math.abs((self.player.x + self.player.width/2) - (object.x + object.width/2)) < 12 
+           and math.abs((self.player.y + self.player.height) - object.y) <= 8
+           and not self.transitioning and not self.player.controlLock then
+            
+            self.transitioning = true
+            self.player.controlLock = true
+            self.player.x = object.x + object.width/2 - self.player.width/2
+            
+            Timer.tween(1.0, {
+                [self.player] = {y = object.y + 32, opacity = 0}
+            }):finish(function()
+                self.player:addScore(1000)
+                love.filesystem.write('lvls', tostring(self.levelNum + 1))
+                gStateMachine:change('play', {
+                    levelNum = self.levelNum + 1,
+                    lives = self.player.lives,
+                    powerupState = PLAYER_STATE_SMALL,
+                    score = self.player.score
+                })
+            end)
+        end
+    end
+
+    for i = #self.level.entities, 1, -1 do
+        local entity = self.level.entities[i]
+        local isFriend = entity.texture == 'princess' or entity.texture == 'mushroom-friend'
+        
+        if entity.class ~= 'DonkeyKong' and entity.class ~= 'Bowser' and not isFriend and self.player:collides(entity) and not self.player.controlLock then
+            local previousBottom = (self.player.y + self.player.height) - (self.player.dy * dt)
+            local currentBottom = self.player.y + self.player.height
+            local entityTop = entity.y
+
+            local isStomp = (self.player.dy > 0 and previousBottom <= entityTop + 8 and currentBottom >= entityTop) or
+                            (self.player.dy <= 0 and currentBottom <= entityTop + 4)
+
+            if isStomp then
+                gSounds['kill']:play()
+                gSounds['kill2']:play()
+                self.player:addScore(100)
+                table.remove(self.level.entities, i)
+                self.player.invincibleTimer = 0.1 
+                self.player:changeState('jump', {
+                    velocity = -200,
+                    playSound = false
+                })
+            else
+                self.player:takeHit()
             end
         end
     end
 
+    for i = #self.fireballs, 1, -1 do
+        local fireball = self.fireballs[i]
+        fireball:update(dt)
+
+        local hitEnemy = false
+        for j = #self.level.entities, 1, -1 do
+            local enemy = self.level.entities[j]
+            if enemy.class ~= 'DonkeyKong' and enemy.texture ~= 'bowser' and fireball:collides(enemy) then
+                enemy:takeDamage()
+                fireball.dead = true 
+                hitEnemy = true
+                break
+            end
+        end
+        if hitEnemy then goto next_fireball end
+
+        for j = #self.rockets, 1, -1 do
+            if fireball:collides(self.rockets[j]) then
+                gSounds['kill']:play()
+                table.remove(self.rockets, j)
+                fireball.dead = true
+                goto next_fireball
+            end
+        end
+
+        if fireball.player ~= self.player and fireball:collides(self.player) and not self.player.invincible then
+            self.player:takeHit()
+            fireball.dead = true
+            goto next_fireball
+        end
+
+        if fireball.x < self.camX - fireball.width or fireball.x > self.camX + VIRTUAL_WIDTH or
+           fireball.y < self.camY - fireball.height or fireball.y > self.camY + VIRTUAL_HEIGHT then
+            fireball.dead = true
+        elseif fireball.lifetime <= 0 then 
+            fireball.dead = true
+        end
+        ::next_fireball::
+    end
+
     local snailNear = false
+
+    for i = #self.fireballs, 1, -1 do
+        if self.fireballs[i].dead then
+            table.remove(self.fireballs, i)
+        end
+    end
     local goombaNear = false
     local anyEntities = false
 
     for i = #self.level.entities, 1, -1 do
         local entity = self.level.entities[i]
 
-        -- Fix: Check against the actual map height, not just the virtual screen height
-        if entity.y > self.tileMap.height * TILE_SIZE then
+        if entity.hitTimer and entity.hitTimer > 0 then
+            entity.hitTimer = entity.hitTimer - dt
+        end
+
+        if entity.y > self.tileMap.height * TILE_SIZE or entity.dead then
             table.remove(self.level.entities, i)
         else
             anyEntities = true
             local dist = math.abs(entity.x - self.player.x)
-            -- Trigger sound if within 6 tiles
             if dist < TILE_SIZE * 6 then
                 if entity.texture == 'snail' then snailNear = true end
                 if entity.texture == 'creatures' then goombaNear = true end
@@ -287,7 +585,6 @@ function PlayState:update(dt)
         end
     end
 
-    -- Logic for Snail (Turtle) sounds
     if snailNear then
         gSounds['turtleSounds']:setLooping(true)
         if not gSounds['turtleSounds']:isPlaying() then
@@ -297,7 +594,6 @@ function PlayState:update(dt)
         gSounds['turtleSounds']:stop()
     end
 
-    -- Logic for Goomba sounds
     if goombaNear then
         gSounds['goomba']:setLooping(true)
         if not gSounds['goomba']:isPlaying() then
@@ -307,13 +603,15 @@ function PlayState:update(dt)
         gSounds['goomba']:stop()
     end
 
-    -- Handle Springs vs Creatures
     for _, entity in pairs(self.level.entities) do
         for _, object in pairs(self.level.objects) do
             if object.isSpring and entity:collides(object) then
-                entity.dy = -400 -- Bounce the creature
-                object.hit = true
-                Timer.after(0.25, function() object.hit = false end)
+                local springTop = object.y + 16
+                if entity.dy >= 0 and (entity.y + entity.height) <= springTop + 5 then
+                    entity.dy = -400 
+                    object.hit = true
+                    Timer.after(0.25, function() object.hit = false end)
+                end
             end
         end
     end
@@ -324,7 +622,6 @@ function PlayState:update(dt)
     local flag = nil
     local castle = nil
     for _, object in pairs(self.level.objects) do
-        -- Check if player is colliding with any part of the pole
         if object.isFlagPole and self.player:collides(object) then 
             touchedPole = object 
         end
@@ -334,7 +631,6 @@ function PlayState:update(dt)
         if object.isCastle then castle = object end
     end
 
-    -- Trigger victory sequence only when Mario enters the castle
     if castle and not self.transitioning and self.player:collides(castle) then
        
         self.transitioning = true
@@ -347,7 +643,6 @@ function PlayState:update(dt)
         gSounds['pickup']:play()
 
         Chain(
-            -- 1. Walk into the castle door
             function(go)
                 self.player:changeState('walking')
                 self.player.direction = 'right'
@@ -355,9 +650,7 @@ function PlayState:update(dt)
                     [self.player] = {x = castle.x + castle.width / 2 - self.player.width / 2}
                 }):finish(go)
             end,
-            -- 2. Snap to the top floor of the castle
             function(go)
-                -- Make him invisible while "inside" the castle
                 Timer.tween(0.1, { [self.player] = { opacity = 0 } }):finish(function()
                     Timer.after(0.5, function()
                         self.player.y = castle.y - self.player.height
@@ -366,31 +659,32 @@ function PlayState:update(dt)
                     end)
                 end)
             end,
-            -- 3. Jump from the top floor to the flagpole
             function(go)
                 self.player:changeState('jump', { velocity = -200, playSound = true })
                 Timer.tween(0.7, {
                     [self.player] = {x = flagpoleTop.x - 6, y = flagpoleTop.y}
                 }):finish(go)
             end,
-            -- 4. Grab pole and slide flag down
             function(go)
                 self.player.dy = 0
-                self.player.currentAnimation = Animation { frames = {6}, interval = 1 }
+                self.player.inFlagpoleSequence = true
                 Timer.tween(1.2, {
                     [flag] = {y = flagpoleBase.y},
                     [self.player] = {y = flagpoleBase.y}
                 }):finish(go)
             end,
-            -- 5. Fade out
             function(go)
                 Timer.tween(1.0, {
                     [self] = {fadeOpacity = 1}
                 }):finish(go)
             end
         )(function()
+            love.filesystem.write('lvls', tostring(self.levelNum + 1)) 
+            self.player:addScore(1000)
             gStateMachine:change('play', {
-                levelNum = self.levelNum + 1,
+                levelNum = self.levelNum + 1, 
+                lives = self.player.lives,
+                powerupState = PLAYER_STATE_SMALL, 
                 score = self.player.score
             })
         end)()
@@ -400,7 +694,6 @@ function PlayState:update(dt)
         if self.player.x < 0 then
             self.player.x = 0
         elseif self.player.x > TILE_SIZE * self.tileMap.width - self.player.width then
-            -- Check if we are currently touching the exit pipe
             local touchingExit = false
             for _, object in pairs(self.level.objects) do
                 if object.isExit and self.player:collides(object) then
@@ -409,7 +702,6 @@ function PlayState:update(dt)
                 end
             end
             
-            -- Only block movement if we aren't trying to enter the exit pipe
             if not touchingExit then
                 self.player.x = TILE_SIZE * self.tileMap.width - self.player.width
             end
@@ -418,52 +710,70 @@ function PlayState:update(dt)
 
     self:updateCamera(dt)
 
+    if love.keyboard.wasPressed('z') then 
+        self.player:throwFireball()
+    end
+
 end
 
 function PlayState:render()
     love.graphics.push()
 
-    if self.shakeAmount > 0 then
-        love.graphics.translate(math.random(-self.shakeAmount, self.shakeAmount), math.random(-self.shakeAmount, self.shakeAmount))
-    end
-    
-    -- Draw Overworld/Boss Background in Screen Space (Static Backdrop, No Rolling)
-    if self.levelNum <= 10 then
+    if self.levelNum < 10 then
         love.graphics.draw(gTextures['backgrounds'], gFrames['backgrounds'][self.background], 0, 0)
         love.graphics.draw(gTextures['backgrounds'], gFrames['backgrounds'][self.background], 0, 128)
+    elseif self.levelNum == 26 then
+        love.graphics.setColor(0.1, 0.1, 0.1, 1) 
+        love.graphics.rectangle('fill', 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT)
+        love.graphics.setColor(1, 1, 1, 1)
+    elseif self.levelNum >= 21 then
+        for bgX = 0, VIRTUAL_WIDTH, 16 do
+            love.graphics.draw(gTextures['underwater-topper'], gFrames['underwater-topper'][1], bgX, 0)
+            for bgY = 16, VIRTUAL_HEIGHT, 16 do
+                love.graphics.draw(gTextures['underwater-bg'], gFrames['underwater-bg'][1], bgX, bgY)
+            end
+        end
     end
 
     love.graphics.translate(-math.floor(self.camera.x), -math.floor(self.camera.y))
 
-    -- Custom rendering for Boss Fight (Level 10) and Underground World (Level 11+)
     if self.levelNum >= 10 then
-        -- For underground levels (11+), draw nothing (black)
-        if self.levelNum >= UNDERGROUND_LEVEL_START then
-            -- No background for underground levels, default clear color is black
-        else -- Boss fight level (10) still uses background
+        if self.levelNum >= UNDERGROUND_LEVEL_START or self.levelNum == 10 or self.levelNum == 20 then
+        else 
             local bgStartX = math.floor(self.camX / 256) * 256 - 256
             local bgEndX = self.camX + VIRTUAL_WIDTH + 256
             local bgStartY = math.floor(self.camY / 128) * 128 - 128
             local bgEndY = self.camY + VIRTUAL_HEIGHT + 128
 
             for bgX = bgStartX, bgEndX, 256 do
-                for bgY = bgStartY, bgEndY, 128 do -- Step by 128px (actual texture height)
+                for bgY = bgStartY, bgEndY, 128 do 
                     love.graphics.draw(gTextures['backgrounds'], gFrames['backgrounds'][self.background], bgX, bgY)
                 end
             end
         end
         if self.level.tileMap then self.level.tileMap:render() end
-        if self.level.entities then for _, e in pairs(self.level.entities) do e:render() end end
-        self.player:render()
         if self.level.objects then for _, o in pairs(self.level.objects) do o:render() end end
+        if self.level.entities then for _, e in pairs(self.level.entities) do e:render() end end
+        for _, r in pairs(self.rockets) do
+            local quad = gFrames[r.texture] and gFrames[r.texture][r.frame or 1]
+            if quad then
+                love.graphics.draw(gTextures[r.texture], quad, 
+                    math.floor(r.x) + r.width / 2, math.floor(r.y) + r.height / 2,
+                    0, r.dx > 0 and -1 or 1, 1,
+                    r.width / 2, r.height / 2)
+            end
+        end
+        self.player:render()
         
-    -- Standard level rendering
     else
         self.level:render()
         self.player:render()
     end
 
-    -- Draw the black screen for transitions
+    for _, fireball in pairs(self.fireballs) do
+        fireball:render()
+    end
+
     love.graphics.setColor(0, 0, 0, self.fadeOpacity)
     love.graphics.rectangle('fill', 0, 0, VIRTUAL_WIDTH, VIRTUAL_HEIGHT)
     love.graphics.setColor(1, 1, 1, 1)
@@ -476,26 +786,24 @@ function PlayState:render()
         love.graphics.print(tostring(self.player.score), 5, 5)
         love.graphics.print("Level: " .. tostring(self.levelNum), 5, 20)
         love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.print("Lives: " .. tostring(self.player.lives), 4, 34)
+        love.graphics.print("Lives: " .. tostring(self.player.lives), 5, 35)
         love.graphics.print(tostring(self.player.score), 4, 4)
         love.graphics.print("Level: " .. tostring(self.levelNum), 4, 19)
     end
 
-    -- Boss UI Elements (HP Bar and Dialogue)
-    if self.levelNum == 10 then
+    if self.levelNum == 10 or self.levelNum == 20 then
         local dk = nil
         for _, e in pairs(self.level.entities) do
             if e.texture == 'donkey-kong' then dk = e break end
         end
 
-        if dk then
-            -- Golden border for the Boss HP bar
-            love.graphics.setColor(1, 0.84, 0, 1) -- Golden color
+        if dk and dk.hp and dk.maxHP then
+            love.graphics.setColor(1, 0.84, 0, 1) 
             love.graphics.rectangle('line', VIRTUAL_WIDTH / 2 - 41, 4, 82, 8)
-
-            -- HP Bar background
             love.graphics.setColor(0, 0, 0, 0.5)
             love.graphics.rectangle('fill', VIRTUAL_WIDTH / 2 - 40, 5, 80, 6)
-            -- HP Bar fill
+
             love.graphics.setColor(1, 0, 0, 1)
             love.graphics.rectangle('fill', VIRTUAL_WIDTH / 2 - 40, 5, (dk.hp / dk.maxHP) * 80, 6)
             love.graphics.setColor(1, 1, 1, 1)
@@ -510,62 +818,212 @@ function PlayState:render()
             love.graphics.printf(self.dialogueText, 15, VIRTUAL_HEIGHT - 35, VIRTUAL_WIDTH - 30, 'left')
         end
     end
+
+    if self.levelNum == 26 then
+        local bowser = nil
+        for _, e in pairs(self.level.entities) do
+            if e.texture == 'bowser' then bowser = e break end
+        end
+        if bowser and bowser.hp and bowser.maxHP then
+            love.graphics.setColor(1, 0.84, 0, 1) 
+            love.graphics.rectangle('line', VIRTUAL_WIDTH / 2 - 41, 4, 82, 8)
+            love.graphics.setColor(0, 0, 0, 0.5)
+            love.graphics.rectangle('fill', VIRTUAL_WIDTH / 2 - 40, 5, 80, 6)
+
+            love.graphics.setColor(1, 0, 0, 1)
+            love.graphics.rectangle('fill', VIRTUAL_WIDTH / 2 - 40, 5, (bowser.hp / bowser.maxHP) * 80, 6)
+            love.graphics.setColor(1, 1, 1, 1)
+        end
+    end
 end
 
+
 function PlayState:updateCamera(dt)
-    if self.transitioning and self.lockedCamX then
+    if self.lockedCamX then
         self.camera.x = self.lockedCamX
         return
     end
 
     self.camera:update(dt, self.player, self.levelNum)
     
-    -- Sync internal variables for any external logic still using camX/Y
     self.camX = self.camera.x
     self.camY = self.camera.y
 end
 
-function PlayState:spawnEnemies()
-    if self.levelNum >= UNDERGROUND_LEVEL_START then -- Underground specific enemy spawning
-        local lowerFloorRow = self.tileMap.height - 1
+function PlayState:triggerBowserVictory()
+    self.transitioning = true
+    self.lockedCamX = self.camX
+    self.showHUD = false
+    self.player.controlLock = true
+    self.player.dx = 0
+    self.player.dy = 0
 
-        -- Scan the entire vertical shaft for ground tiles to spawn enemies on platforms
-        for x = 8, self.tileMap.width - 8 do
-            for y = 4, lowerFloorRow do
-                local tile = self.tileMap.tiles[y] and self.tileMap.tiles[y][x]
-                local aboveTile = self.tileMap.tiles[y - 1] and self.tileMap.tiles[y - 1][x]
+    gSounds['powerup-reveal']:play() 
+
+    Chain(
+        function(go)
+            self.dialogueText = "Princess Peach: Mario! You saved us!"
+            Timer.after(2.5, go)
+        end,
+        function(go)
+            self.dialogueText = "Luigi: Wowie! You actually did it, bro!"
+            Timer.after(2, go)
+        end,
+        function(go)
+            self.dialogueText = "Mushroom Friend: The castle is safe again! Let's go home!"
+            Timer.after(2, go)
+        end,
+        function(go)
+            self.dialogueText = nil
+            Timer.tween(1.0, { [self] = { fadeOpacity = 1 } }):finish(go)
+        end
+    )(function()
+        love.filesystem.write('lvls', tostring(self.levelNum + 1))
+        gStateMachine:change('start')
+    end)
+end
+
+function PlayState:spawnEnemies()
+    if self.levelNum >= 21 and self.levelNum <= 25 then
+        for x = 10, self.tileMap.width - 25 do
+            if math.random(8) == 1 then 
+                local isSquid = math.random(2) == 1
+                local enemy = Entity {
+                    texture = isSquid and 'squid' or 'fish',
+                    x = (x - 1) * TILE_SIZE,
+                    y = math.random(2, 6) * TILE_SIZE,
+                    width = 16, -- Match the 16x24 frame width for squids
+                    height = isSquid and 24 or 16,
+                    dx = isSquid and 0 or 40, 
+                    level = self.level,
+                    animations = {
+                        ['idle'] = Animation {
+                            frames = {1, 2}, 
+                            interval = 0.2
+                        }
+                    }
+                }
+                enemy.direction = 'right' 
+
+                enemy.currentAnimation = enemy.animations['idle']
                 
-                -- If we find a ground tile with empty space above it, potentially spawn an enemy
-                if tile and tile.id == TILE_ID_UNDERGROUND_GROUND and aboveTile and aboveTile.id == TILE_ID_EMPTY and math.random(12) == 1 then
-                    local enemy
-                    if math.random(2) == 1 then
-                        enemy = Snail {
-                            texture = 'snail',
-                            x = (x - 1) * TILE_SIZE,
-                        y = (y - 1) * TILE_SIZE - 16, -- Spawn on top of the tile
-                            width = 16,
-                            height = 16,
-                            level = self.level
-                        }
-                    else
-                        enemy = Goomba {
-                            texture = 'creatures',
-                            x = (x - 1) * TILE_SIZE,
-                        y = (y - 1) * TILE_SIZE - 16, -- Spawn on top of the tile
-                            width = 16,
-                            height = 16,
-                            level = self.level
-                        }
+                enemy.class = 'Enemy'
+                enemy.takeDamage = function(this) this.dead = true end
+
+                enemy.update = function(this, dt)
+                    if this.currentAnimation then
+                        this.currentAnimation:update(dt)
                     end
 
-                    enemy.stateMachine = StateMachine {
-                        ['idle'] = function() return SnailIdleState(self.tileMap, self.player, enemy) end,
-                        ['moving'] = function() return SnailMovingState(self.tileMap, self.player, enemy) end,
-                        ['chasing'] = function() return SnailChasingState(self.tileMap, self.player, enemy) end
-                    }
+                    if isSquid then
+                        local diffX = this.x - self.player.x
+                        local diffY = this.y - self.player.y
+                        local dist = math.sqrt(diffX * diffX + diffY * diffY)
 
-                    enemy:changeState('moving')
-                    table.insert(self.level.entities, enemy)
+                        if dist < 220 then
+                            local speed = 30
+                            local dirX = this.x < self.player.x and 1 or -1
+                            local dirY = this.y < self.player.y and 1 or -1
+                            
+                            this.x = this.x + dirX * speed * dt
+                            this.y = this.y + dirY * speed * dt
+                            
+                            this.direction = dirX == 1 and 'left' or 'right'
+                        end
+                    else
+                        this.x = this.x + this.dx * dt
+                        
+                        if this.x < 0 then
+                            this.x = 0
+                            this.dx = -this.dx
+                        elseif this.x > self.tileMap.width * TILE_SIZE - this.width then
+                            this.x = self.tileMap.width * TILE_SIZE - this.width
+                            this.dx = -this.dx
+                        end
+
+                        this.direction = this.dx > 0 and 'left' or 'right'
+                    end
+                end
+                table.insert(self.level.entities, enemy)
+            end
+        end
+        return
+    end
+
+    if self.levelNum == 10 or self.levelNum == 20 then
+        return
+    end
+
+    if self.levelNum >= UNDERGROUND_LEVEL_START or self.levelNum == 26 then 
+        local lowerFloorRow = self.tileMap.height - 1
+
+        for x = 8, self.tileMap.width - 4 do
+            for y = 3, lowerFloorRow do
+                local isFloorTile = self.tileMap.tiles[y][x].id == TILE_ID_UNDERGROUND_GROUND
+                                 or self.tileMap.tiles[y][x].id == TILE_ID_CASTLE_GROUND
+                local isFloorObject = false
+                
+                for _, obj in pairs(self.level.objects) do
+                    if obj.solid and obj.texture == 'underground-bricks' and math.floor(obj.x / TILE_SIZE) + 1 == x and math.floor(obj.y / TILE_SIZE) + 1 == y then
+                        isFloorObject = true
+                        break
+                    end
+                end
+
+                if isFloorTile or isFloorObject then
+                    local isSpaceAboveEmpty = self.tileMap.tiles[y - 1][x].id == TILE_ID_EMPTY
+                    
+                    if isSpaceAboveEmpty then
+                        for _, obj in pairs(self.level.objects) do
+                            if obj.solid and math.floor(obj.x / TILE_SIZE) + 1 == x and math.floor(obj.y / TILE_SIZE) + 1 == y - 1 then
+                                isSpaceAboveEmpty = false
+                                break
+                            end
+                        end
+                    end
+
+                    local hasPipe = false
+                    for _, obj in pairs(self.level.objects) do
+                        if obj.texture == 'pipes' then
+                            local pipeX = math.floor(obj.x / TILE_SIZE) + 1
+                            if x == pipeX or x == pipeX + 1 then
+                                hasPipe = true
+                                break
+                            end
+                        end
+                    end
+
+                    if isSpaceAboveEmpty and not hasPipe and math.random(10) == 1 then
+                        local enemy
+                        local spawnX = (x - 1) * TILE_SIZE
+                        local spawnY = (y - 2) * TILE_SIZE
+
+                        if math.random(2) == 1 then
+                            enemy = Snail {
+                                texture = 'snail',
+                                x = spawnX,
+                                y = spawnY,
+                                width = 16, height = 16,
+                                level = self.level
+                            }
+                        else
+                            enemy = Goomba {
+                                texture = 'creatures',
+                                x = spawnX,
+                                y = spawnY,
+                                width = 16, height = 16,
+                                level = self.level
+                            }
+                        end
+
+                        enemy.stateMachine = StateMachine {
+                            ['idle'] = function() return SnailIdleState(self.tileMap, self.player, enemy) end,
+                            ['moving'] = function() return SnailMovingState(self.tileMap, self.player, enemy) end,
+                            ['chasing'] = function() return SnailChasingState(self.tileMap, self.player, enemy) end
+                        }
+                        enemy:changeState('moving')
+                        table.insert(self.level.entities, enemy)
+                    end
                 end
             end
         end
@@ -573,12 +1031,8 @@ function PlayState:spawnEnemies()
         return
     end
 
-    if self.levelNum >= 10 then return end -- No enemies in boss levels
-    
     for x = 1, self.tileMap.width do
-        -- Skip the start area and the last 20 columns (Castle/Flag area)
         if x > 6 and x < self.tileMap.width - 20 then
-            -- First, check if there's a solid object (like a pipe) at this column
             local hasPipeAtLocation = false
             for _, object in pairs(self.level.objects) do
                 if object.solid then
@@ -599,7 +1053,6 @@ function PlayState:spawnEnemies()
                 self.tileMap.tiles[6][x] and
                 self.tileMap.tiles[6][x].id == TILE_ID_EMPTY
 
-            -- Only spawn enemies on normal ground so they don't appear to walk in the air.
             if not hasPipeAtLocation and hasGroundSurface and math.random(10) == 1 then
                 local enemy
                 if math.random(2) == 1 then

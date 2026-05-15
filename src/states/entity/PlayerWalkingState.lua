@@ -2,15 +2,27 @@ PlayerWalkingState = Class{__includes = BaseState}
 
 function PlayerWalkingState:init(player)
     self.player = player
+    self.name = 'walking'
     self.animation = Animation {
-        frames = {3, 4, 5},
+        frames = {2, 3},
         interval = 0.1
     }
-    self.player.currentAnimation = self.animation
 end
 
 function PlayerWalkingState:update(dt)
-    self.player.currentAnimation:update(dt)
+    -- Handle jump input with key press tracking
+    local jumpKeyDown = love.keyboard.isDown('space') or love.keyboard.isDown('up')
+    
+    if jumpKeyDown and not self.player.jumpKeyPressed then
+        -- Jump key just pressed
+        if self.player:canPerformOverworldJump() then
+            self.player.jumpKeyPressed = true
+            self.player:changeState('jump')
+        end
+    elseif not jumpKeyDown then
+        -- Jump key released
+        self.player.jumpKeyPressed = false
+    end
 
     if self.player.controlLock then return end
 
@@ -30,7 +42,9 @@ function PlayerWalkingState:update(dt)
 
     -- check to see whether there are any tiles beneath us
     if #collidedObjects == 0 and (tileBottomLeft and tileBottomRight) and (not tileBottomLeft:collidable() and not tileBottomRight:collidable()) then
-        self.player.dy = 0
+        if self.player.level.levelNum < 21 then
+            self.player.dy = 0
+        end
         self.player:changeState('falling')
         return
     end
@@ -44,23 +58,5 @@ function PlayerWalkingState:update(dt)
         self.player.x = self.player.x + PLAYER_WALK_SPEED * dt
         self.player.direction = 'right'
         self.player:checkRightCollisions(dt)
-    end
-    
-    -- Check pipe collisions AFTER movement
-    if self.player:checkPipeCollisions(dt) then
-        return
-    end
-    
-    -- check if we've collided with any entities and die if so
-    for k, entity in pairs(self.player.level.entities) do
-        if entity:collides(self.player) then
-            gSounds['death']:play()
-            gStateMachine:change('start')
-            return
-        end
-    end
-
-    if love.keyboard.wasPressed('space') then
-        self.player:changeState('jump')
     end
 end

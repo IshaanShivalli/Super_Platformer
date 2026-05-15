@@ -22,7 +22,7 @@ This project was created for educational and non-commercial purposes using Lua a
 - LÖVE2D
 - Custom game states and sprite systems
 
-![Gameplay ](screenshots/world1.png)
+![Gameplay](screenshots/world1.png)
 ![Gameplay Screenshot](screenshots/DonkeyKong.png)
 ## Controls
 
