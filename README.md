@@ -42,5 +42,5 @@ This project was created for educational and non-commercial purposes using Lua a
 
 ```
 bash
-git clone https://github.com/IshaanShivalli/your-repo-name.git
+git clone https://github.com/IshaanShivalli/Super_Platformer.git
 ```

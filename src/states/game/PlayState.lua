@@ -173,12 +173,13 @@ function PlayState:update(dt)
                 self.player.controlLock = true
                 Chain(
                     function(go)
+                        gSounds['dk-roar']:play()
                         self.dialogueText = "Bowser: Gwa ha ha! You've reached the end of the line, Mario!"
                         Timer.after(2.5, go)
                     end,
                     function(go) self.dialogueText = "Mario: Where are my friends?!" Timer.after(2, go) end,
                     function(go) self.dialogueText = "Bowser: They're my guests of honor... forever!" Timer.after(2, go) end,
-                    function(go) self.dialogueText = nil self.player.controlLock = false go() end
+                    function(go) self.dialogueText = nil self.player.controlLock = false bowser.active = true go() end
                 )()
             end
         end
@@ -465,6 +466,7 @@ function PlayState:update(dt)
             end
 
             if bowser.defeated then
+                gSounds['music']:stop()
                 for _, obj in pairs(self.level.objects) do
                     if obj.isGate then obj.dead = true end
                 end

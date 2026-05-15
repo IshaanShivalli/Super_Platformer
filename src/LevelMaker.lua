@@ -232,13 +232,18 @@ function LevelMaker.generate(width, height, levelNum)
         local gate = GameObject {
             texture = 'gate',
             x = (bowserCol + 2) * TILE_SIZE,
-            y = (groundRow - 1) * TILE_SIZE,
+            y = (groundRow - 7) * TILE_SIZE,
             width = 16,
-            height = 16,
+            height = 96,
             frame = 1,
             collidable = true,
             solid = true,
-            isGate = true
+            isGate = true,
+            render = function(self)
+                for i = 0, 5 do
+                    love.graphics.draw(gTextures['gate'], gFrames['gate'][1], self.x, self.y + (i * 16))
+                end
+            end
         }
         table.insert(objects, gate)
 

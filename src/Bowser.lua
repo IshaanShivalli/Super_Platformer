@@ -10,6 +10,7 @@ function Bowser:init(def)
     self.attackCooldown = 2
     self.hitTimer = 0
     self.defeated = false
+    self.active = false
 
     self.dy = 0
     self.groundY = self.y
@@ -39,7 +40,7 @@ end
 function Bowser:update(dt)
     self.currentAnimation:update(dt)
 
-    if self.defeated then
+    if self.defeated or not self.active then
         return
     end
 
